@@ -59,15 +59,22 @@ function canChat() {
   return state.subscribed || state.freeMessagesUsed < 20;
 }
 
-function speak(text) {
-  if (!("speechSynthesis" in window)) return;
-  const u = new SpeechSynthesisUtterance(text);
-  u.rate = 0.95;
-  u.pitch = 1.05;
+function getPreferredVoice() {
   const voices = speechSynthesis.getVoices();
-  const preferred = voices.find(v => /hi-IN|en-IN/i.test(v.lang) && /female|heera|sangeeta|veena|lekha|zira/i.test(v.name))
+  return voices.find(v => /hi-IN|en-IN/i.test(v.lang) && /female|heera|sangeeta|veena|lekha|kavya|ananya|priya/i.test(v.name))
+    || voices.find(v => /hi-IN|en-IN/i.test(v.lang) && /female/i.test(v.name))
     || voices.find(v => /hi-IN|en-IN/i.test(v.lang))
     || voices.find(v => /female/i.test(v.name));
+}
+
+function speak(text) {
+  if (!("speechSynthesis" in window) || !state.callActive) return;
+  speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(text);
+  u.rate = 1.0;
+  u.pitch = 1.12;
+  u.volume = 1;
+  const preferred = getPreferredVoice();
   if (preferred) u.voice = preferred;
   speechSynthesis.speak(u);
 }
@@ -82,21 +89,79 @@ function getRecognition() {
   return rec;
 }
 
+const mealLibrary = {
+  breakfast: [
+    "Moong chilla + mint chutney",
+    "Vegetable oats upma",
+    "Poha with peanuts + sprouts",
+    "Besan cheela + curd",
+    "Idli + sambar",
+    "Ragi dosa + coconut chutney",
+    "Paneer stuffed multigrain toast",
+  ],
+  midMorning: [
+    "1 guava + 5 almonds",
+    "Papaya bowl + pumpkin seeds",
+    "Apple slices + peanut butter (thin)",
+    "Coconut water + chia",
+    "Pear + walnuts",
+    "Buttermilk + roasted seeds",
+  ],
+  lunch: [
+    "2 multigrain rotis + dal + salad + sabzi",
+    "Brown rice + rajma + cucumber salad",
+    "Millet khichdi + curd + veggie stir fry",
+    "Quinoa pulao + chole + salad",
+    "Roti + paneer bhurji + lauki sabzi",
+    "Lemon rice + sambar + beans poriyal",
+  ],
+  eveningSnack: [
+    "Roasted chana + buttermilk",
+    "Makhana chaat + green tea",
+    "Sprouts bhel + lemon",
+    "Boiled corn + herbal tea",
+    "Fruit chaat + flax seeds",
+    "Hummus + cucumber sticks",
+  ],
+  dinner: [
+    "Paneer/tofu + sauteed veggies + soup",
+    "Dal soup + veg stir fry + 1 phulka",
+    "Grilled fish/tofu + salad bowl",
+    "Mixed veg clear soup + chickpea salad",
+    "Moong khichdi + sauteed greens",
+    "Stuffed capsicum + lentil soup",
+  ],
+  bedtime: [
+    "Haldi milk (low sugar)",
+    "Chamomile tea",
+    "Unsweetened almond milk",
+    "Jeera-ajwain warm water",
+    "Cinnamon infused warm water",
+  ]
+};
+
+function pickByDay(list, day, salt = 0) {
+  return list[(day + salt) % list.length];
+}
+
 function buildDayPlan(day, condition, mealChange) {
+  const dinnerItem = mealChange || pickByDay(mealLibrary.dinner, day, 4);
   return {
-    breakfast: `Moong chilla + curd (${condition})`,
-    midMorning: "1 fruit + 5 almonds",
-    lunch: "2 multigrain rotis + dal + salad + sabzi",
-    eveningSnack: "Roasted chana + buttermilk",
-    dinner: mealChange || "Paneer/tofu + sautéed veggies + soup",
-    bedtime: "Haldi milk (low sugar) or herbal tea",
     day,
+    breakfast: `${pickByDay(mealLibrary.breakfast, day, 1)} (${condition})`,
+    midMorning: pickByDay(mealLibrary.midMorning, day, 2),
+    lunch: pickByDay(mealLibrary.lunch, day, 3),
+    eveningSnack: pickByDay(mealLibrary.eveningSnack, day, 0),
+    dinner: dinnerItem,
+    bedtime: pickByDay(mealLibrary.bedtime, day, 5),
   };
 }
 
 function createDietPlanData(days, condition, mealChange) {
   const plan = [];
-  for (let d = 1; d <= days; d++) plan.push(buildDayPlan(d, condition, mealChange));
+  for (let d = 1; d <= days; d++) {
+    plan.push(buildDayPlan(d, condition, mealChange));
+  }
   return plan;
 }
 
@@ -188,13 +253,13 @@ function handleSendText(text, sender = "user") {
       downloadLabel: "Download diet plan PDF",
       downloadCallback: () => dietPlanToPdf(days, condition, mealChange),
     });
-    speak("Done! I have prepared your diet plan. Tap download to get the PDF.");
+    if (state.callActive) speak("Done! I have prepared your diet plan. Tap download to get the PDF.");
     return;
   }
 
   const reply = genericReply(text);
   addMessage(reply, "bot");
-  speak(reply);
+  if (state.callActive) speak(reply);
 }
 
 async function parseReport(file) {
@@ -241,7 +306,9 @@ function startCallMode() {
   callBtn.textContent = "🛑";
   assistantStatus.textContent = "on call • listening";
   addMessage("Call started. Speak naturally — I’ll reply like a normal conversation.", "bot");
-  speak("Hey, I am here. Tell me how you're feeling today and what you ate.");
+  speak("Hey! I am here with you. Tell me how your meals and energy felt today.");
+
+  let restartAttempts = 0;
 
   rec.onresult = (event) => {
     const transcript = event.results[event.results.length - 1][0].transcript.trim();
@@ -249,28 +316,54 @@ function startCallMode() {
     handleSendText(transcript, "user");
   };
 
-  rec.onerror = () => {
-    addMessage("Voice recognition interrupted. Tap call again to continue.", "bot");
-    stopCallMode(rec);
+  rec.onerror = (event) => {
+    const err = event?.error || "unknown";
+    if (!state.callActive) return;
+
+    if (err === "no-speech" || err === "aborted") {
+      // transient; restart below via onend
+      return;
+    }
+    if (err === "not-allowed" || err === "service-not-allowed") {
+      addMessage("Microphone permission is blocked. Please allow mic access and call again.", "bot");
+      stopCallMode(rec, true);
+      return;
+    }
+    addMessage("Voice recognition interrupted. Trying to reconnect...", "bot");
   };
 
   rec.onend = () => {
-    if (state.callActive) rec.start();
+    if (!state.callActive) return;
+    if (restartAttempts >= 10) {
+      addMessage("Call paused due to repeated mic interruptions. Tap call to reconnect.", "bot");
+      stopCallMode(rec, true);
+      return;
+    }
+    restartAttempts += 1;
+    setTimeout(() => {
+      if (!state.callActive) return;
+      try { rec.start(); } catch (_) {}
+    }, 250);
   };
 
-  rec.start();
+  try { rec.start(); } catch (_) {
+    addMessage("Could not start microphone. Please retry.", "bot");
+    stopCallMode(rec, true);
+    return;
+  }
   callBtn._rec = rec;
 }
 
-function stopCallMode(rec) {
+function stopCallMode(rec, silent = false) {
   state.callActive = false;
   assistantStatus.textContent = "online • BalanceBite by Dietician Aakriti";
   callBtn.textContent = "📞";
+  speechSynthesis.cancel();
   const r = rec || callBtn._rec;
   if (r) {
     try { r.onend = null; r.stop(); } catch (_) {}
   }
-  addMessage("Call ended.", "bot");
+  if (!silent) addMessage("Call ended.", "bot");
 }
 
 sendBtn.addEventListener("click", () => {
