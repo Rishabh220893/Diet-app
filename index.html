@@ -10,65 +10,43 @@
     <script src="app.js" defer></script>
   </head>
   <body>
-    <div class="app-shell">
-      <aside class="sidebar">
-        <h1>Jeevika</h1>
-        <p class="subtitle">BalanceBite by Dietician Aakriti</p>
-
-        <div class="block">
-          <label for="languageSelect">Language</label>
-          <select id="languageSelect">
-            <option value="en">English</option>
-            <option value="hi">हिन्दी (Hindi)</option>
-            <option value="ta">தமிழ் (Tamil)</option>
-            <option value="bn">বাংলা (Bengali)</option>
-          </select>
+    <div class="wa-shell">
+      <header class="wa-header">
+        <div class="avatar">J</div>
+        <div>
+          <strong>Jeevika Assistant</strong>
+          <p id="assistantStatus">online • BalanceBite by Dietician Aakriti</p>
         </div>
-
-        <div class="block">
-          <h2>Subscription</h2>
-          <p id="usageInfo">Free messages left: 20</p>
-          <div class="plans">
-            <button data-plan="monthly" class="plan-btn">₹100 / month</button>
-            <button data-plan="yearly" class="plan-btn">₹1000 / year</button>
-          </div>
-          <small>Razorpay integration placeholder (account details pending).</small>
+        <div class="header-buttons">
+          <button id="assistantDetailsBtn" class="icon-btn" title="Assistant details">ℹ️</button>
+          <button id="callBtn" class="icon-btn" title="Call Jeevika">📞</button>
         </div>
+      </header>
 
-        <div class="block">
-          <h2>Health Reports</h2>
-          <input type="file" id="reportInput" accept=".pdf,image/*" />
-          <p id="reportStatus">No report uploaded yet.</p>
-        </div>
+      <section id="chatArea" class="wa-chat"></section>
 
-        <div class="block">
-          <h2>Diet Plan Generator</h2>
-          <label>Days <input type="number" id="dietDays" min="1" max="60" value="7" /></label>
-          <label>Condition <input type="text" id="dietCondition" placeholder="e.g. PCOS, diabetes" /></label>
-          <label>Meal changes <textarea id="dietMealChanges" placeholder="e.g. replace dinner roti with soup"></textarea></label>
-          <button id="downloadPlan">Download Plan (PDF)</button>
-        </div>
-      </aside>
-
-      <main class="chat-wrapper">
-        <header class="chat-header">
-          <div>
-            <strong>Jeevika Assistant</strong>
-            <p>Casual health support • text + voice</p>
-          </div>
-          <div class="header-actions">
-            <button id="callBtn">📞 Call Jeevika</button>
-            <button id="notifyBtn">🔔 Daily check-ins</button>
-          </div>
-        </header>
-
-        <section id="chatArea" class="chat-area"></section>
-
-        <footer class="chat-input-wrap">
-          <input id="messageInput" type="text" placeholder="Type a message..." />
-          <button id="sendBtn">Send</button>
-        </footer>
-      </main>
+      <footer class="wa-input-row">
+        <label for="reportInput" class="icon-btn attach-btn" title="Attach report">📎</label>
+        <input id="reportInput" type="file" accept=".pdf,image/*" hidden />
+        <button id="langBtn" class="icon-btn" title="Language">🌐</button>
+        <input id="messageInput" type="text" placeholder="Type a message" />
+        <button id="sendBtn" class="send-btn">➤</button>
+      </footer>
     </div>
+
+    <dialog id="assistantDetailsDialog">
+      <h3>Assistant details</h3>
+      <p><strong>Name:</strong> Jeevika</p>
+      <p><strong>Clinic:</strong> BalanceBite by Dietician Aakriti</p>
+      <p id="usageInfo">Free messages left: 20</p>
+      <div class="plans">
+        <button data-plan="monthly" class="plan-btn">₹100 / month</button>
+        <button data-plan="yearly" class="plan-btn">₹1000 / year</button>
+      </div>
+      <small>Razorpay checkout to be connected after account details are shared.</small>
+      <menu>
+        <button id="closeDetails">Close</button>
+      </menu>
+    </dialog>
   </body>
 </html>
