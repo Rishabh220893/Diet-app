@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Jeevika | BalanceBite Assistant</title>
+    <link rel="stylesheet" href="styles.css" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.min.js" defer></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" defer></script>
+    <script src="app.js" defer></script>
+  </head>
+  <body>
+    <div class="wa-shell">
+      <header class="wa-header">
+        <div class="avatar">J</div>
+        <div>
+          <strong>Jeevika Assistant</strong>
+          <p id="assistantStatus">online • BalanceBite by Dietician Aakriti</p>
+        </div>
+        <div class="header-buttons">
+          <button id="assistantDetailsBtn" class="icon-btn" title="Assistant details">ℹ️</button>
+          <button id="callBtn" class="icon-btn" title="Call Jeevika">📞</button>
+        </div>
+      </header>
+
+      <section id="chatArea" class="wa-chat"></section>
+
+      <footer class="wa-input-row">
+        <label for="reportInput" class="icon-btn attach-btn" title="Attach report">📎</label>
+        <input id="reportInput" type="file" accept=".pdf,image/*" hidden />
+        <button id="langBtn" class="icon-btn" title="Language">🌐</button>
+        <input id="messageInput" type="text" placeholder="Type a message" />
+        <button id="sendBtn" class="send-btn">➤</button>
+      </footer>
+
+      <section id="callScreen" class="call-screen hidden" aria-hidden="true">
+        <div class="call-top">
+          <div class="call-avatar">J</div>
+          <h2>Jeevika Assistant</h2>
+          <p id="callStateText">Calling...</p>
+          <p id="callTimer">00:00</p>
+        </div>
+        <div class="call-actions">
+          <button id="muteBtn" class="call-action-btn">🎤 Mute</button>
+          <button id="speakerBtn" class="call-action-btn active">🔊 Speaker</button>
+          <button id="hangupBtn" class="call-action-btn danger">📞 End</button>
+        </div>
+      </section>
+    </div>
+
+    <dialog id="assistantDetailsDialog">
+      <h3>Assistant details</h3>
+      <p><strong>Name:</strong> Jeevika</p>
+      <p><strong>Clinic:</strong> BalanceBite by Dietician Aakriti</p>
+      <p id="usageInfo">Free messages left: 20</p>
+      <div class="plans">
+        <button data-plan="monthly" class="plan-btn">₹100 / month</button>
+        <button data-plan="yearly" class="plan-btn">₹1000 / year</button>
+      </div>
+      <small>Razorpay checkout to be connected after account details are shared.</small>
+      <menu>
+        <button id="closeDetails">Close</button>
+      </menu>
+    </dialog>
+  </body>
+</html>
