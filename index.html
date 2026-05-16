@@ -1,66 +1,144 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Jeevika | BalanceBite Assistant</title>
+    <title>SceneWatch AI | Multi-Camera Scene Summary</title>
     <link rel="stylesheet" href="styles.css" />
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.min.js" defer></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" defer></script>
+    <script
+      src="https://cdn.jsdelivr.net/npm/hls.js@1.5.18/dist/hls.min.js"
+      defer
+    ></script>
+    <script
+      src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"
+      defer
+    ></script>
+    <script
+      src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js"
+      defer
+    ></script>
     <script src="app.js" defer></script>
   </head>
   <body>
-    <div class="wa-shell">
-      <header class="wa-header">
-        <div class="avatar">J</div>
+    <main class="app-shell">
+      <header class="hero">
         <div>
-          <strong>Jeevika Assistant</strong>
-          <p id="assistantStatus">online • BalanceBite by Dietician Aakriti</p>
+          <p class="eyebrow">Native camera + CCTV scene intelligence</p>
+          <h1>SceneWatch AI</h1>
+          <p class="hero-copy">
+            Connect phone, desktop, IP, HLS, WebRTC, or CCTV gateway streams and
+            receive rolling summaries every 30 seconds.
+          </p>
         </div>
-        <div class="header-buttons">
-          <button id="assistantDetailsBtn" class="icon-btn" title="Assistant details">ℹ️</button>
-          <button id="callBtn" class="icon-btn" title="Call Jeevika">📞</button>
+        <div class="hero-status">
+          <span id="modelStatus" class="status-pill">Loading detector…</span>
+          <strong id="cameraCount">0 cameras</strong>
+          <small>Analysis interval: 30s</small>
         </div>
       </header>
 
-      <section id="chatArea" class="wa-chat"></section>
-
-      <footer class="wa-input-row">
-        <label for="reportInput" class="icon-btn attach-btn" title="Attach report">📎</label>
-        <input id="reportInput" type="file" accept=".pdf,image/*" hidden />
-        <button id="langBtn" class="icon-btn" title="Language">🌐</button>
-        <input id="messageInput" type="text" placeholder="Type a message" />
-        <button id="sendBtn" class="send-btn">➤</button>
-      </footer>
-
-      <section id="callScreen" class="call-screen hidden" aria-hidden="true">
-        <div class="call-top">
-          <div class="call-avatar">J</div>
-          <h2>Jeevika Assistant</h2>
-          <p id="callStateText">Calling...</p>
-          <p id="callTimer">00:00</p>
+      <section class="control-panel" aria-labelledby="addCameraTitle">
+        <div>
+          <h2 id="addCameraTitle">Add or link cameras</h2>
+          <p>
+            Use the device camera directly, or add existing CCTV streams exposed
+            as HTTP video, HLS (.m3u8), WebRTC, or gateway snapshot URLs.
+          </p>
         </div>
-        <div class="call-actions">
-          <button id="muteBtn" class="call-action-btn">🎤 Mute</button>
-          <button id="speakerBtn" class="call-action-btn active">🔊 Speaker</button>
-          <button id="hangupBtn" class="call-action-btn danger">📞 End</button>
+        <form id="cameraForm" class="camera-form">
+          <label>
+            Camera name
+            <input
+              id="cameraName"
+              type="text"
+              placeholder="Front gate"
+              autocomplete="off"
+            />
+          </label>
+          <label>
+            Stream URL
+            <input
+              id="cameraUrl"
+              type="url"
+              placeholder="https://example.com/cam/front.m3u8"
+            />
+          </label>
+          <label>
+            Source type
+            <select id="cameraType">
+              <option value="hls">CCTV HLS / m3u8</option>
+              <option value="video">HTTP/MP4/MJPEG gateway</option>
+              <option value="webrtc">WebRTC page/embed URL</option>
+              <option value="snapshot">Snapshot image URL</option>
+            </select>
+          </label>
+          <button type="submit">Link CCTV camera</button>
+        </form>
+        <div class="native-actions">
+          <button id="addNativeCamera" class="primary-action" type="button">
+            Use phone/desktop camera
+          </button>
+          <button id="runAllNow" type="button">Analyze all now</button>
         </div>
       </section>
-    </div>
 
-    <dialog id="assistantDetailsDialog">
-      <h3>Assistant details</h3>
-      <p><strong>Name:</strong> Jeevika</p>
-      <p><strong>Clinic:</strong> BalanceBite by Dietician Aakriti</p>
-      <p id="usageInfo">Free messages left: 20</p>
-      <div class="plans">
-        <button data-plan="monthly" class="plan-btn">₹100 / month</button>
-        <button data-plan="yearly" class="plan-btn">₹1000 / year</button>
-      </div>
-      <small>Razorpay checkout to be connected after account details are shared.</small>
-      <menu>
-        <button id="closeDetails">Close</button>
-      </menu>
-    </dialog>
+      <section class="summary-strip" aria-label="Live scene summary">
+        <article>
+          <span>People</span>
+          <strong id="peopleTotal">0</strong>
+        </article>
+        <article>
+          <span>Vehicles</span>
+          <strong id="vehicleTotal">0</strong>
+        </article>
+        <article>
+          <span>Faces</span>
+          <strong id="faceTotal">0</strong>
+        </article>
+        <article>
+          <span>Last update</span>
+          <strong id="lastUpdate">Never</strong>
+        </article>
+      </section>
+
+      <section id="cameraGrid" class="camera-grid" aria-live="polite"></section>
+
+      <aside class="face-vault" aria-labelledby="faceVaultTitle">
+        <div>
+          <p class="eyebrow">Known faces</p>
+          <h2 id="faceVaultTitle">Face name vault</h2>
+          <p>
+            Detected face crops can be saved by name on this device for operator
+            review and matching notes.
+          </p>
+        </div>
+        <form id="faceForm" class="face-form">
+          <label>
+            Person name
+            <input
+              id="faceName"
+              type="text"
+              placeholder="Aarav Sharma"
+              autocomplete="off"
+              required
+            />
+          </label>
+          <label>
+            Optional note
+            <input
+              id="faceNote"
+              type="text"
+              placeholder="Resident, employee, visitor…"
+              autocomplete="off"
+            />
+          </label>
+          <button type="submit">Save selected face</button>
+        </form>
+        <div id="selectedFace" class="selected-face">
+          No face crop selected yet.
+        </div>
+        <div id="faceList" class="face-list"></div>
+      </aside>
+    </main>
   </body>
 </html>

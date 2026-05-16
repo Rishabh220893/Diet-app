@@ -1,440 +1,590 @@
+const ANALYSIS_INTERVAL_MS = 30_000;
+const VEHICLE_CLASSES = new Set([
+  "car",
+  "truck",
+  "bus",
+  "motorcycle",
+  "bicycle",
+  "train",
+]);
+const FACE_STORE_KEY = "scenewatchKnownFaces";
+const CAMERA_STORE_KEY = "scenewatchLinkedCameras";
+
 const state = {
-  language: localStorage.getItem("jeevikaLanguage") || "en",
-  freeMessagesUsed: Number(localStorage.getItem("jeevikaFreeMessagesUsed") || 0),
-  subscribed: localStorage.getItem("jeevikaSubscribed") === "true",
-  subscriptionPlan: localStorage.getItem("jeevikaSubscriptionPlan") || null,
-  reportText: localStorage.getItem("jeevikaReportText") || "",
-  reportName: localStorage.getItem("jeevikaReportName") || "",
-  callActive: false,
-  isMuted: false,
-  speakerOn: true,
-  recognition: null,
-  micStream: null,
-  callStartMs: 0,
-  callTimerInt: null,
-  processingSpeech: false,
+  cameras: [],
+  detector: null,
+  selectedFace: null,
+  knownFaces: loadJson(FACE_STORE_KEY, []),
 };
 
-const i18n = {
-  en: {
-    welcome: "Hey! I’m Jeevika 🌿 Your health buddy from BalanceBite. Ask me anything about food, reports, or say: create diet plan for 14 days for diabetes.",
-    limit: "You’ve used 20 free messages. Subscribe from Assistant details to continue.",
-  },
-  hi: {
-    welcome: "हाय! मैं Jeevika 🌿 हूँ। डाइट, रिपोर्ट और रोज़मर्रा की हेल्थ हेल्प के लिए मुझसे बात करें।",
-    limit: "आपके 20 फ्री मैसेज पूरे हो गए हैं। आगे बढ़ने के लिए सब्सक्राइब करें।",
-  },
-};
+const cameraGrid = document.querySelector("#cameraGrid");
+const cameraForm = document.querySelector("#cameraForm");
+const cameraName = document.querySelector("#cameraName");
+const cameraUrl = document.querySelector("#cameraUrl");
+const cameraType = document.querySelector("#cameraType");
+const addNativeCamera = document.querySelector("#addNativeCamera");
+const runAllNow = document.querySelector("#runAllNow");
+const modelStatus = document.querySelector("#modelStatus");
+const cameraCount = document.querySelector("#cameraCount");
+const peopleTotal = document.querySelector("#peopleTotal");
+const vehicleTotal = document.querySelector("#vehicleTotal");
+const faceTotal = document.querySelector("#faceTotal");
+const lastUpdate = document.querySelector("#lastUpdate");
+const faceForm = document.querySelector("#faceForm");
+const faceName = document.querySelector("#faceName");
+const faceNote = document.querySelector("#faceNote");
+const selectedFace = document.querySelector("#selectedFace");
+const faceList = document.querySelector("#faceList");
 
-const chatArea = document.getElementById("chatArea");
-const messageInput = document.getElementById("messageInput");
-const sendBtn = document.getElementById("sendBtn");
-const langBtn = document.getElementById("langBtn");
-const callBtn = document.getElementById("callBtn");
-const reportInput = document.getElementById("reportInput");
-const usageInfo = document.getElementById("usageInfo");
-const assistantDetailsBtn = document.getElementById("assistantDetailsBtn");
-const assistantDetailsDialog = document.getElementById("assistantDetailsDialog");
-const closeDetails = document.getElementById("closeDetails");
-const assistantStatus = document.getElementById("assistantStatus");
-const callScreen = document.getElementById("callScreen");
-const callStateText = document.getElementById("callStateText");
-const callTimer = document.getElementById("callTimer");
-const muteBtn = document.getElementById("muteBtn");
-const speakerBtn = document.getElementById("speakerBtn");
-const hangupBtn = document.getElementById("hangupBtn");
-
-function setUsage() {
-  const left = Math.max(0, 20 - state.freeMessagesUsed);
-  usageInfo.textContent = state.subscribed
-    ? `Subscribed (${state.subscriptionPlan}) • Unlimited messages`
-    : `Free messages left: ${left}`;
-}
-
-function addMessage(text, sender = "bot", options = {}) {
-  const div = document.createElement("div");
-  div.className = `msg ${sender}`;
-  div.innerHTML = `${text}<div class="meta">${new Date().toLocaleTimeString()}</div>`;
-
-  if (options.downloadCallback) {
-    const btn = document.createElement("button");
-    btn.className = "chat-download-btn";
-    btn.textContent = options.downloadLabel || "Download PDF";
-    btn.addEventListener("click", options.downloadCallback);
-    div.appendChild(btn);
-  }
-
-  chatArea.appendChild(div);
-  chatArea.scrollTop = chatArea.scrollHeight;
-}
-
-function canChat() {
-  return state.subscribed || state.freeMessagesUsed < 20;
-}
-
-function getPreferredVoice() {
-  const voices = speechSynthesis.getVoices();
-  return voices.find((v) => /hi-IN|en-IN/i.test(v.lang) && /female|heera|sangeeta|veena|lekha|kavya|ananya|priya/i.test(v.name))
-    || voices.find((v) => /hi-IN|en-IN/i.test(v.lang) && /female/i.test(v.name))
-    || voices.find((v) => /hi-IN|en-IN/i.test(v.lang));
-}
-
-function speak(text) {
-  if (!state.callActive || !state.speakerOn || !("speechSynthesis" in window)) return;
-  speechSynthesis.cancel();
-  const utterance = new SpeechSynthesisUtterance(text);
-  utterance.rate = 1.02;
-  utterance.pitch = 1.1;
-  utterance.volume = 1;
-  const voice = getPreferredVoice();
-  if (voice) utterance.voice = voice;
-  speechSynthesis.speak(utterance);
-}
-
-const mealLibrary = {
-  breakfast: ["Moong chilla + mint chutney", "Vegetable oats upma", "Poha with peanuts + sprouts", "Besan cheela + curd", "Idli + sambar", "Ragi dosa + coconut chutney", "Paneer multigrain toast"],
-  midMorning: ["Guava + almonds", "Papaya + pumpkin seeds", "Apple + peanut butter", "Coconut water + chia", "Pear + walnuts", "Buttermilk + seeds"],
-  lunch: ["Roti + dal + salad + sabzi", "Brown rice + rajma + salad", "Millet khichdi + curd", "Quinoa pulao + chole", "Roti + paneer bhurji", "Lemon rice + sambar"],
-  eveningSnack: ["Roasted chana + buttermilk", "Makhana chaat + tea", "Sprouts bhel", "Boiled corn", "Fruit chaat", "Hummus + cucumber"],
-  dinner: ["Paneer/tofu + soup", "Dal soup + phulka", "Grilled fish/tofu + salad", "Veg clear soup + chickpea salad", "Moong khichdi + greens", "Stuffed capsicum + lentil soup"],
-  bedtime: ["Haldi milk", "Chamomile tea", "Unsweetened almond milk", "Jeera-ajwain water", "Cinnamon warm water"],
-};
-
-const pickByDay = (list, day, salt = 0) => list[(day + salt) % list.length];
-
-function createDietPlanData(days, condition, mealChange) {
-  const plan = [];
-  for (let day = 1; day <= days; day += 1) {
-    plan.push({
-      day,
-      breakfast: `${pickByDay(mealLibrary.breakfast, day, 1)} (${condition})`,
-      midMorning: pickByDay(mealLibrary.midMorning, day, 2),
-      lunch: pickByDay(mealLibrary.lunch, day, 3),
-      eveningSnack: pickByDay(mealLibrary.eveningSnack, day, 4),
-      dinner: mealChange || pickByDay(mealLibrary.dinner, day, 5),
-      bedtime: pickByDay(mealLibrary.bedtime, day, 6),
-    });
-  }
-  return plan;
-}
-
-function dietPlanToPdf(days, condition, mealChange) {
-  if (!window.jspdf?.jsPDF) {
-    addMessage("PDF tool not loaded. Please check internet and retry.", "bot");
-    return;
-  }
-  const { jsPDF } = window.jspdf;
-  const doc = new jsPDF();
-  const plan = createDietPlanData(days, condition, mealChange);
-  doc.setFontSize(16);
-  doc.text("BalanceBite - Jeevika Diet Plan", 14, 16);
-  doc.setFontSize(11);
-  doc.text(`Days: ${days}`, 14, 24);
-  doc.text(`Condition: ${condition}`, 14, 30);
-  doc.text(`Meal changes: ${mealChange || "No custom changes"}`, 14, 36, { maxWidth: 180 });
-  let y = 48;
-  for (const d of plan) {
-    const lines = [
-      `Day ${d.day}`,
-      `Breakfast: ${d.breakfast}`,
-      `Mid-morning: ${d.midMorning}`,
-      `Lunch: ${d.lunch}`,
-      `Evening snack: ${d.eveningSnack}`,
-      `Dinner: ${d.dinner}`,
-      `Bedtime: ${d.bedtime}`,
-      "",
-    ];
-    for (const line of lines) {
-      doc.text(line, 14, y, { maxWidth: 180 });
-      y += 7;
-      if (y > 280) {
-        doc.addPage();
-        y = 18;
-      }
-    }
-  }
-  doc.save(`Jeevika_Diet_Plan_${days}_days.pdf`);
-}
-
-function parseDietIntent(text) {
-  const lc = text.toLowerCase();
-  if (!/(diet plan|meal plan|create plan|plan for)/.test(lc)) return null;
-  const days = Number((lc.match(/(\d{1,2})\s*(day|days)/) || [])[1] || 7);
-  let condition = "General wellness";
-  if (lc.includes("diabetes")) condition = "Diabetes";
-  else if (lc.includes("pcos")) condition = "PCOS";
-  else if (lc.includes("thyroid")) condition = "Thyroid";
-  else if (lc.includes("weight loss")) condition = "Weight loss";
-  const changeMatch = text.match(/(replace|change|swap|no\s+rice|no\s+sugar).*/i);
-  return { days: Math.max(1, Math.min(60, days)), condition, mealChange: changeMatch ? changeMatch[0] : "" };
-}
-
-function genericReply(text) {
-  const lc = text.toLowerCase();
-  if (state.reportText && /(report|sugar|thyroid|cholesterol|hb|hemoglobin)/.test(lc)) {
-    return `Based on your report (${state.reportName || "file"}), here is usable context:\n${state.reportText.slice(0, 420)}\n\nIf you want, I can generate a report-based diet plan now.`;
-  }
-  if (/hello|hi|hey/.test(lc)) return "Hey! Tell me what you ate today and I’ll improve it in a simple way 😊";
-  if (/water|hydration/.test(lc)) return "Hydration check: aim 8–10 glasses today 💧 Want a reminder pattern?";
-  return "Got you 👍 I can do report-based guidance and instant downloadable diet plans from chat.";
-}
-
-function handleSendText(text, sender = "user") {
-  addMessage(text, sender);
-  if (!canChat()) return addMessage(i18n[state.language]?.limit || i18n.en.limit, "bot");
-
-  if (!state.subscribed && sender === "user") {
-    state.freeMessagesUsed += 1;
-    localStorage.setItem("jeevikaFreeMessagesUsed", String(state.freeMessagesUsed));
-    setUsage();
-  }
-
-  const intent = parseDietIntent(text);
-  if (intent) {
-    const { days, condition, mealChange } = intent;
-    addMessage(`Perfect! I created your ${days}-day plan for ${condition} with full-day meals.`, "bot", {
-      downloadLabel: "Download diet plan PDF",
-      downloadCallback: () => dietPlanToPdf(days, condition, mealChange),
-    });
-    if (state.callActive) speak("Done! Your plan is ready. Tap download to get the PDF.");
-    return;
-  }
-
-  const reply = genericReply(text);
-  addMessage(reply, "bot");
-  if (state.callActive) speak(reply);
-}
-
-async function parseReport(file) {
-  if (!file) return;
-  state.reportName = file.name;
-  localStorage.setItem("jeevikaReportName", file.name);
-
-  if (file.type.startsWith("image/")) {
-    state.reportText = `Image report uploaded: ${file.name}. OCR is browser-limited, share values in chat for precise advice.`;
-    localStorage.setItem("jeevikaReportText", state.reportText);
-    addMessage(`Attached: ${file.name}. I’ll use this as medical context.`, "bot");
-    return;
-  }
-
-  const ext = file.name.split(".").pop().toLowerCase();
-  if (ext === "pdf" && window.pdfjsLib) {
-    const buffer = await file.arrayBuffer();
-    const pdf = await window.pdfjsLib.getDocument({ data: buffer }).promise;
-    let text = "";
-    for (let i = 1; i <= Math.min(5, pdf.numPages); i += 1) {
-      const page = await pdf.getPage(i);
-      const content = await page.getTextContent();
-      text += `Page ${i}: ${content.items.map((it) => it.str).join(" ")}\n`;
-    }
-    state.reportText = text || `PDF uploaded: ${file.name}`;
-    localStorage.setItem("jeevikaReportText", state.reportText);
-    addMessage(`Attached: ${file.name}. I read it and will prioritize report-based answers.`, "bot");
-    return;
-  }
-
-  state.reportText = `Report uploaded: ${file.name}`;
-  localStorage.setItem("jeevikaReportText", state.reportText);
-  addMessage(`Attached: ${file.name}.`, "bot");
-}
-
-function fmtElapsed(ms) {
-  const s = Math.floor(ms / 1000);
-  const mm = String(Math.floor(s / 60)).padStart(2, "0");
-  const ss = String(s % 60).padStart(2, "0");
-  return `${mm}:${ss}`;
-}
-
-function updateCallUi(active) {
-  callScreen.classList.toggle("hidden", !active);
-  callScreen.setAttribute("aria-hidden", String(!active));
-  callBtn.textContent = active ? "🛑" : "📞";
-  assistantStatus.textContent = active ? "on call • listening" : "online • BalanceBite by Dietician Aakriti";
-}
-
-function getRecognition() {
-  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SR) return null;
-  const rec = new SR();
-  rec.continuous = true;
-  rec.interimResults = false;
-  rec.lang = state.language === "hi" ? "hi-IN" : "en-IN";
-  return rec;
-}
-
-function restartRecognitionSoon() {
-  if (!state.callActive || state.isMuted || state.processingSpeech || !state.recognition) return;
-  setTimeout(() => {
-    if (!state.callActive || state.isMuted || state.processingSpeech || !state.recognition) return;
-    try { state.recognition.start(); } catch (_) {}
-  }, 350);
-}
-
-function wireRecognitionHandlers(rec) {
-  rec.onresult = (event) => {
-    const transcript = event.results[event.results.length - 1][0].transcript.trim();
-    if (!transcript || !state.callActive || state.isMuted) return;
-    state.processingSpeech = true;
-    handleSendText(transcript, "user");
-    setTimeout(() => {
-      state.processingSpeech = false;
-      restartRecognitionSoon();
-    }, 900);
-  };
-
-  rec.onerror = (event) => {
-    if (!state.callActive) return;
-    const err = event?.error || "unknown";
-    if (err === "not-allowed" || err === "service-not-allowed") {
-      callStateText.textContent = "Mic blocked. Please allow microphone and call again.";
-      addMessage("Mic permission blocked. Tap Allow and call again.", "bot");
-      stopCallMode(true);
-      return;
-    }
-    if (!["no-speech", "aborted"].includes(err)) {
-      callStateText.textContent = "Reconnecting microphone...";
-    }
-  };
-
-  rec.onend = () => {
-    if (!state.callActive || state.isMuted || state.processingSpeech) return;
-    restartRecognitionSoon();
-  };
-}
-
-async function ensureMicPermission() {
-  if (!window.isSecureContext) {
-    addMessage("Call needs a secure page. Open via http://localhost:4173 (not file://).", "bot");
-    return false;
-  }
-  if (!navigator.mediaDevices?.getUserMedia) {
-    addMessage("Microphone is not supported in this browser.", "bot");
-    return false;
-  }
+function loadJson(key, fallback) {
   try {
-    if (!state.micStream) {
-      state.micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    }
-    return true;
-  } catch (_) {
-    addMessage("Please allow microphone access to use call mode.", "bot");
-    return false;
+    return JSON.parse(localStorage.getItem(key)) ?? fallback;
+  } catch {
+    return fallback;
   }
 }
 
-async function startCallMode() {
-  if (state.callActive) return;
-  const ok = await ensureMicPermission();
-  if (!ok) return;
-
-  const rec = getRecognition();
-  if (!rec) {
-    addMessage("Speech recognition not available here. Use Chrome/Edge on localhost.", "bot");
-    return;
-  }
-
-  state.callActive = true;
-  state.recognition = rec;
-  state.isMuted = false;
-  state.processingSpeech = false;
-  callStateText.textContent = "Connected • Listening";
-  state.callStartMs = Date.now();
-  updateCallUi(true);
-  muteBtn.classList.remove("active");
-  muteBtn.textContent = "🎤 Mute";
-  speakerBtn.classList.toggle("active", state.speakerOn);
-
-  clearInterval(state.callTimerInt);
-  state.callTimerInt = setInterval(() => {
-    callTimer.textContent = fmtElapsed(Date.now() - state.callStartMs);
-  }, 1000);
-  callTimer.textContent = "00:00";
-
-  wireRecognitionHandlers(rec);
-  try { rec.start(); } catch (_) {}
-
-  addMessage("Call started. I’m listening now.", "bot");
-  speak("Hi! I can hear you now. Tell me how you're feeling today.");
+function saveJson(key, value) {
+  localStorage.setItem(key, JSON.stringify(value));
 }
 
-function stopCallMode(silent = false) {
-  state.callActive = false;
-  state.processingSpeech = false;
-  if (state.recognition) {
-    try { state.recognition.onend = null; state.recognition.stop(); } catch (_) {}
-  }
-  state.recognition = null;
-  speechSynthesis.cancel();
-  clearInterval(state.callTimerInt);
-  state.callTimerInt = null;
-  updateCallUi(false);
-  callStateText.textContent = "Calling...";
-  callTimer.textContent = "00:00";
-  if (!silent) addMessage("Call ended.", "bot");
+function uid(prefix) {
+  return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
-function toggleMute() {
-  state.isMuted = !state.isMuted;
-  muteBtn.classList.toggle("active", state.isMuted);
-  muteBtn.textContent = state.isMuted ? "🔇 Muted" : "🎤 Mute";
-  callStateText.textContent = state.isMuted ? "Muted" : "Connected • Listening";
-
-  if (state.isMuted && state.recognition) {
-    try { state.recognition.stop(); } catch (_) {}
-  } else if (!state.isMuted) {
-    restartRecognitionSoon();
-  }
-}
-
-function toggleSpeaker() {
-  state.speakerOn = !state.speakerOn;
-  speakerBtn.classList.toggle("active", state.speakerOn);
-  speakerBtn.textContent = state.speakerOn ? "🔊 Speaker" : "🔈 Earpiece";
-  if (!state.speakerOn) speechSynthesis.cancel();
-}
-
-sendBtn.addEventListener("click", () => {
-  const t = messageInput.value.trim();
-  if (!t) return;
-  messageInput.value = "";
-  handleSendText(t, "user");
-});
-messageInput.addEventListener("keydown", (e) => e.key === "Enter" && sendBtn.click());
-
-langBtn.addEventListener("click", () => {
-  state.language = state.language === "en" ? "hi" : "en";
-  localStorage.setItem("jeevikaLanguage", state.language);
-  addMessage(`Language switched to ${state.language === "en" ? "English" : "Hindi"}.`, "bot");
-});
-
-reportInput.addEventListener("change", async (e) => {
-  try { await parseReport(e.target.files[0]); } catch { addMessage("Couldn’t read this report properly. Try another file.", "bot"); }
-});
-
-callBtn.addEventListener("click", () => (state.callActive ? stopCallMode() : startCallMode()));
-hangupBtn.addEventListener("click", () => stopCallMode());
-muteBtn.addEventListener("click", toggleMute);
-speakerBtn.addEventListener("click", toggleSpeaker);
-
-assistantDetailsBtn.addEventListener("click", () => assistantDetailsDialog.showModal());
-closeDetails.addEventListener("click", () => assistantDetailsDialog.close());
-
-for (const btn of document.querySelectorAll(".plan-btn")) {
-  btn.addEventListener("click", () => {
-    state.subscribed = true;
-    state.subscriptionPlan = btn.dataset.plan;
-    localStorage.setItem("jeevikaSubscribed", "true");
-    localStorage.setItem("jeevikaSubscriptionPlan", state.subscriptionPlan);
-    setUsage();
-    assistantDetailsDialog.close();
-    addMessage(`Subscription active (${state.subscriptionPlan}). Razorpay checkout can be linked once account details are provided.`, "bot");
+function timeLabel(date = new Date()) {
+  return date.toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
   });
 }
 
-if ("speechSynthesis" in window) {
-  speechSynthesis.onvoiceschanged = () => getPreferredVoice();
+function escapeHtml(value = "") {
+  return value.replace(
+    /[&<>"]/g,
+    (char) =>
+      ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+      })[char],
+  );
 }
 
-setUsage();
-addMessage(i18n[state.language]?.welcome || i18n.en.welcome, "bot");
-if (state.reportName) addMessage(`Loaded previous report context: ${state.reportName}`, "bot");
+function persistedCameras() {
+  return state.cameras
+    .filter((camera) => camera.kind !== "native")
+    .map(({ id, name, type, url }) => ({ id, name, type, url }));
+}
+
+async function loadDetector() {
+  modelStatus.textContent = "Loading COCO-SSD detector…";
+  const started = Date.now();
+  while (!window.cocoSsd && Date.now() - started < 15_000) {
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+
+  if (!window.cocoSsd) {
+    modelStatus.textContent =
+      "Detector unavailable • basic scene summaries active";
+    return;
+  }
+
+  try {
+    state.detector = await window.cocoSsd.load({ base: "lite_mobilenet_v2" });
+    modelStatus.textContent = "Detector ready • people, vehicles, objects";
+  } catch (error) {
+    console.warn("Unable to load object detector", error);
+    modelStatus.textContent = "Detector failed • basic scene summaries active";
+  }
+}
+
+function createCameraRecord({
+  name,
+  type,
+  url = "",
+  kind = "cctv",
+  stream = null,
+}) {
+  return {
+    id: uid("cam"),
+    name:
+      name ||
+      (kind === "native" ? "Native device camera" : "Linked CCTV camera"),
+    type,
+    url,
+    kind,
+    stream,
+    timer: null,
+    elements: {},
+    last: {
+      people: 0,
+      vehicles: 0,
+      faces: 0,
+      objects: [],
+      summary: "Waiting for first scan.",
+    },
+  };
+}
+
+function renderEmptyState() {
+  if (state.cameras.length) return;
+  cameraGrid.innerHTML = `
+    <div class="camera-empty">
+      <h2>No cameras linked yet</h2>
+      <p>Add your phone/desktop camera or connect CCTV streams from NVR/VMS gateways. Each camera can be analyzed independently every 30 seconds.</p>
+    </div>
+  `;
+}
+
+function makeVideo(camera) {
+  const video = document.createElement("video");
+  video.muted = true;
+  video.autoplay = true;
+  video.playsInline = true;
+  video.crossOrigin = "anonymous";
+
+  if (camera.stream) {
+    video.srcObject = camera.stream;
+  } else if (camera.type === "hls" && window.Hls?.isSupported()) {
+    const hls = new window.Hls();
+    hls.loadSource(camera.url);
+    hls.attachMedia(video);
+    camera.hls = hls;
+  } else {
+    video.src = camera.url;
+  }
+
+  video.addEventListener("loadedmetadata", () => video.play().catch(() => {}));
+  return video;
+}
+
+function makeSnapshotImage(camera) {
+  const image = document.createElement("img");
+  image.crossOrigin = "anonymous";
+  image.alt = `${camera.name} snapshot`;
+  image.src = withCacheBust(camera.url);
+  return image;
+}
+
+function makeWebRtcEmbed(camera) {
+  const iframe = document.createElement("iframe");
+  iframe.title = `${camera.name} WebRTC stream`;
+  iframe.allow = "camera; microphone; autoplay; fullscreen";
+  iframe.src = camera.url;
+  return iframe;
+}
+
+function withCacheBust(url) {
+  if (!url) return url;
+  const sep = url.includes("?") ? "&" : "?";
+  return `${url}${sep}_sw=${Date.now()}`;
+}
+
+function renderCamera(camera) {
+  const card = document.createElement("article");
+  card.className = "camera-card";
+  card.dataset.cameraId = camera.id;
+  card.innerHTML = `
+    <div class="camera-head">
+      <div>
+        <h3 class="camera-title"></h3>
+        <p class="camera-meta"></p>
+      </div>
+      <div class="camera-actions">
+        <button class="analyze-btn" type="button">Analyze now</button>
+        <button class="snapshot-btn" type="button">Select face crop</button>
+        <button class="remove-btn" type="button">Remove</button>
+      </div>
+    </div>
+    <div class="video-wrap">
+      <canvas class="overlay-canvas"></canvas>
+    </div>
+    <div class="detection-panel">
+      <div class="detection-row">
+        <span class="badge people">People: <b>0</b></span>
+        <span class="badge vehicle">Vehicles: <b>0</b></span>
+        <span class="badge face">Faces: <b>0</b></span>
+      </div>
+      <div class="scene-summary">
+        <strong>Scene summary</strong>
+        <p class="summary-text">Waiting for first scan.</p>
+      </div>
+    </div>
+  `;
+
+  card.querySelector(".camera-title").textContent = camera.name;
+  card.querySelector(".camera-meta").textContent =
+    `${camera.kind === "native" ? "Native" : "CCTV"} • ${camera.type.toUpperCase()} • updates every 30s`;
+
+  const wrap = card.querySelector(".video-wrap");
+  let source;
+  if (camera.type === "snapshot") source = makeSnapshotImage(camera);
+  else if (camera.type === "webrtc") source = makeWebRtcEmbed(camera);
+  else source = makeVideo(camera);
+
+  wrap.prepend(source);
+  camera.elements = {
+    card,
+    source,
+    overlay: card.querySelector(".overlay-canvas"),
+    peopleBadge: card.querySelector(".badge.people b"),
+    vehicleBadge: card.querySelector(".badge.vehicle b"),
+    faceBadge: card.querySelector(".badge.face b"),
+    summary: card.querySelector(".summary-text"),
+  };
+
+  card
+    .querySelector(".analyze-btn")
+    .addEventListener("click", () => analyzeCamera(camera));
+  card
+    .querySelector(".snapshot-btn")
+    .addEventListener("click", () => selectFaceCrop(camera));
+  card
+    .querySelector(".remove-btn")
+    .addEventListener("click", () => removeCamera(camera.id));
+
+  cameraGrid.appendChild(card);
+  setTimeout(() => analyzeCamera(camera), 900);
+  camera.timer = setInterval(() => analyzeCamera(camera), ANALYSIS_INTERVAL_MS);
+}
+
+function addCamera(camera, persist = true) {
+  if (!state.cameras.length) cameraGrid.innerHTML = "";
+  state.cameras.push(camera);
+  renderCamera(camera);
+  updateTotals();
+  if (persist) saveJson(CAMERA_STORE_KEY, persistedCameras());
+}
+
+async function addNativeDeviceCamera() {
+  if (!navigator.mediaDevices?.getUserMedia) {
+    alert(
+      "This browser does not expose a native camera API. Try Chrome, Edge, Safari, or Firefox on HTTPS/localhost.",
+    );
+    return;
+  }
+
+  const stream = await navigator.mediaDevices.getUserMedia({
+    video: { facingMode: "environment" },
+    audio: false,
+  });
+  addCamera(
+    createCameraRecord({
+      name: "Phone / desktop camera",
+      type: "native",
+      kind: "native",
+      stream,
+    }),
+    false,
+  );
+}
+
+function removeCamera(id) {
+  const index = state.cameras.findIndex((camera) => camera.id === id);
+  if (index === -1) return;
+  const [camera] = state.cameras.splice(index, 1);
+  clearInterval(camera.timer);
+  camera.hls?.destroy?.();
+  camera.stream?.getTracks?.().forEach((track) => track.stop());
+  camera.elements.card.remove();
+  saveJson(CAMERA_STORE_KEY, persistedCameras());
+  updateTotals();
+  renderEmptyState();
+}
+
+function canReadSource(camera) {
+  const source = camera.elements.source;
+  if (camera.type === "webrtc") return false;
+  if (source instanceof HTMLVideoElement) return source.readyState >= 2;
+  if (source instanceof HTMLImageElement)
+    return source.complete && source.naturalWidth > 0;
+  return false;
+}
+
+function drawSourceToCanvas(camera) {
+  if (!canReadSource(camera)) return null;
+  const source = camera.elements.source;
+  const width = source.videoWidth || source.naturalWidth || 640;
+  const height = source.videoHeight || source.naturalHeight || 360;
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  try {
+    ctx.drawImage(source, 0, 0, width, height);
+    ctx.getImageData(0, 0, 1, 1);
+    return canvas;
+  } catch (error) {
+    console.warn(
+      "Unable to read camera frame. Check CORS or gateway settings.",
+      error,
+    );
+    return null;
+  }
+}
+
+async function detectFaces(canvas) {
+  if (!canvas || !("FaceDetector" in window)) return [];
+  try {
+    const detector = new window.FaceDetector({
+      fastMode: true,
+      maxDetectedFaces: 20,
+    });
+    return await detector.detect(canvas);
+  } catch (error) {
+    console.warn("Face detection unavailable", error);
+    return [];
+  }
+}
+
+function summarizeObjects(predictions, faceCount, readable) {
+  if (!readable)
+    return "Stream preview is linked. For browser security, analysis requires a readable frame from native camera, same-origin video, CORS-enabled CCTV, HLS, or a backend gateway.";
+  const people = predictions.filter((p) => p.class === "person").length;
+  const vehicles = predictions.filter((p) =>
+    VEHICLE_CLASSES.has(p.class),
+  ).length;
+  const otherObjects = predictions
+    .filter((p) => p.class !== "person" && !VEHICLE_CLASSES.has(p.class))
+    .slice(0, 5)
+    .map((p) => p.class);
+
+  const parts = [];
+  parts.push(
+    people
+      ? `${people} ${people === 1 ? "person" : "people"} visible`
+      : "No people detected",
+  );
+  parts.push(
+    vehicles
+      ? `${vehicles} vehicle${vehicles === 1 ? "" : "s"} present`
+      : "no vehicles detected",
+  );
+  parts.push(
+    faceCount
+      ? `${faceCount} face${faceCount === 1 ? "" : "s"} found`
+      : "no faces found by the browser face detector",
+  );
+  if (otherObjects.length)
+    parts.push(`notable objects: ${[...new Set(otherObjects)].join(", ")}`);
+  return `${parts.join("; ")}. Updated ${timeLabel()}.`;
+}
+
+function drawOverlay(camera, predictions, faces) {
+  const overlay = camera.elements.overlay;
+  const source = camera.elements.source;
+  const width =
+    source.videoWidth || source.naturalWidth || overlay.clientWidth || 640;
+  const height =
+    source.videoHeight || source.naturalHeight || overlay.clientHeight || 360;
+  overlay.width = width;
+  overlay.height = height;
+  const ctx = overlay.getContext("2d");
+  ctx.clearRect(0, 0, width, height);
+  ctx.lineWidth = Math.max(2, width / 320);
+  ctx.font = `${Math.max(14, width / 42)}px Segoe UI`;
+
+  predictions.forEach((prediction) => {
+    const [x, y, w, h] = prediction.bbox;
+    const isVehicle = VEHICLE_CLASSES.has(prediction.class);
+    ctx.strokeStyle =
+      prediction.class === "person"
+        ? "#43d9ad"
+        : isVehicle
+          ? "#ffd166"
+          : "#65a9ff";
+    ctx.fillStyle = ctx.strokeStyle;
+    ctx.strokeRect(x, y, w, h);
+    ctx.fillText(
+      `${prediction.class} ${Math.round(prediction.score * 100)}%`,
+      x + 6,
+      Math.max(18, y + 20),
+    );
+  });
+
+  faces.forEach((face) => {
+    const { x, y, width: w, height: h } = face.boundingBox;
+    ctx.strokeStyle = "#ffb3c6";
+    ctx.fillStyle = "#ffb3c6";
+    ctx.strokeRect(x, y, w, h);
+    ctx.fillText("face", x + 6, Math.max(18, y + 20));
+  });
+}
+
+async function analyzeCamera(camera) {
+  if (camera.type === "snapshot")
+    camera.elements.source.src = withCacheBust(camera.url);
+
+  const canvas = drawSourceToCanvas(camera);
+  const readable = Boolean(canvas);
+  let predictions = [];
+  let faces = [];
+
+  if (canvas && state.detector) {
+    try {
+      predictions = await state.detector.detect(canvas);
+    } catch (error) {
+      console.warn("Object detection failed", error);
+    }
+  }
+
+  faces = await detectFaces(canvas);
+  const people = predictions.filter(
+    (prediction) => prediction.class === "person",
+  ).length;
+  const vehicles = predictions.filter((prediction) =>
+    VEHICLE_CLASSES.has(prediction.class),
+  ).length;
+  const summary = summarizeObjects(predictions, faces.length, readable);
+
+  camera.last = {
+    people,
+    vehicles,
+    faces: faces.length,
+    objects: predictions,
+    summary,
+  };
+  camera.elements.peopleBadge.textContent = people;
+  camera.elements.vehicleBadge.textContent = vehicles;
+  camera.elements.faceBadge.textContent = faces.length;
+  camera.elements.summary.textContent = summary;
+  drawOverlay(camera, predictions, faces);
+  updateTotals();
+}
+
+function updateTotals() {
+  const totals = state.cameras.reduce(
+    (acc, camera) => {
+      acc.people += camera.last.people;
+      acc.vehicles += camera.last.vehicles;
+      acc.faces += camera.last.faces;
+      return acc;
+    },
+    { people: 0, vehicles: 0, faces: 0 },
+  );
+  cameraCount.textContent = `${state.cameras.length} camera${state.cameras.length === 1 ? "" : "s"}`;
+  peopleTotal.textContent = totals.people;
+  vehicleTotal.textContent = totals.vehicles;
+  faceTotal.textContent = totals.faces;
+  lastUpdate.textContent = state.cameras.length ? timeLabel() : "Never";
+}
+
+async function selectFaceCrop(camera) {
+  const canvas = drawSourceToCanvas(camera);
+  if (!canvas) {
+    selectedFace.textContent =
+      "No readable frame is available yet. Use a native camera or CORS-enabled CCTV stream.";
+    return;
+  }
+
+  const [firstFace] = await detectFaces(canvas);
+  const crop = document.createElement("canvas");
+  const fallbackSize = Math.min(canvas.width, canvas.height) * 0.42;
+  const box = firstFace?.boundingBox || {
+    x: (canvas.width - fallbackSize) / 2,
+    y: (canvas.height - fallbackSize) / 2,
+    width: fallbackSize,
+    height: fallbackSize,
+  };
+  const padding = Math.max(box.width, box.height) * 0.28;
+  const sx = Math.max(0, box.x - padding);
+  const sy = Math.max(0, box.y - padding);
+  const sw = Math.min(canvas.width - sx, box.width + padding * 2);
+  const sh = Math.min(canvas.height - sy, box.height + padding * 2);
+  crop.width = Math.round(sw);
+  crop.height = Math.round(sh);
+  const ctx = crop.getContext("2d");
+  ctx.drawImage(canvas, sx, sy, sw, sh, 0, 0, crop.width, crop.height);
+  const dataUrl = crop.toDataURL("image/jpeg", 0.82);
+  state.selectedFace = {
+    dataUrl,
+    cameraName: camera.name,
+    capturedAt: new Date().toISOString(),
+  };
+  selectedFace.innerHTML = `<img src="${dataUrl}" alt="Selected face crop"><small>Selected from ${escapeHtml(camera.name)}. Enter a name and save.</small>`;
+}
+
+function renderFaces() {
+  if (!state.knownFaces.length) {
+    faceList.innerHTML = '<p class="camera-meta">No named faces saved yet.</p>';
+    return;
+  }
+
+  faceList.innerHTML = state.knownFaces
+    .map(
+      (face) => `
+        <article class="face-card">
+          <img src="${face.dataUrl}" alt="${escapeHtml(face.name)}">
+          <strong>${escapeHtml(face.name)}</strong>
+          <small>${escapeHtml(face.note || "No note")}</small>
+        </article>
+      `,
+    )
+    .join("");
+}
+
+cameraForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  const url = cameraUrl.value.trim();
+  if (!url) return;
+  const camera = createCameraRecord({
+    name: cameraName.value.trim() || undefined,
+    type: cameraType.value,
+    url,
+  });
+  addCamera(camera);
+  cameraForm.reset();
+});
+
+addNativeCamera.addEventListener("click", async () => {
+  try {
+    await addNativeDeviceCamera();
+  } catch (error) {
+    console.warn("Unable to open native camera", error);
+    alert(
+      "Could not open the native camera. Check browser permissions and HTTPS/localhost.",
+    );
+  }
+});
+
+runAllNow.addEventListener("click", () =>
+  state.cameras.forEach((camera) => analyzeCamera(camera)),
+);
+
+faceForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  if (!state.selectedFace) {
+    selectedFace.textContent = "Select a face crop from a camera first.";
+    return;
+  }
+
+  state.knownFaces.unshift({
+    id: uid("face"),
+    name: faceName.value.trim(),
+    note: faceNote.value.trim(),
+    dataUrl: state.selectedFace.dataUrl,
+    cameraName: state.selectedFace.cameraName,
+    capturedAt: state.selectedFace.capturedAt,
+  });
+  saveJson(FACE_STORE_KEY, state.knownFaces);
+  faceForm.reset();
+  state.selectedFace = null;
+  selectedFace.textContent =
+    "Saved. Select another detected face crop when ready.";
+  renderFaces();
+});
+
+function restoreCameras() {
+  const saved = loadJson(CAMERA_STORE_KEY, []);
+  saved.forEach((camera) => {
+    addCamera(createCameraRecord(camera), false);
+  });
+  renderEmptyState();
+}
+
+renderFaces();
+restoreCameras();
+loadDetector();
